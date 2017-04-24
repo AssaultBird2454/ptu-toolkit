@@ -6,6 +6,7 @@
 var gm_data = {};
 var battle = {};
 var currentView = 0;
+var pokedex = "pokemon";
 
 /**
  * Receives commands/messages
@@ -267,11 +268,11 @@ function selectGM() {
 
 $("#expmon-mon").change(function(){
 	var id = $('#expmon-mon').find(":selected").val();
-  	$.getJSON("api/v1/pokemon/"+gm_data["pokemon"][id].dex, function (dex) {
+  	$.getJSON("api/v1/"+pokedex+"/"+gm_data["pokemon"][id].dex, function (dex) {
 	$.getJSON("api/v1/moves/", function (moves) {
 	$.getJSON("api/v1/abilities/", function (abilities) {
 	$.getJSON("api/v1/experience/", function (experience) {
-	$.getJSON("api/v1/nature/"+gm_data["pokemon"][id].nature, function (nature) {
+	$.getJSON("api/v1/natures/"+gm_data["pokemon"][id].nature, function (nature) {
   		$('#expmon-JSON').val(JSONExport(gm_data["pokemon"][id],dex,moves,abilities,experience,nature));
 	});
 	});
@@ -366,6 +367,24 @@ function performMove(moveName, target_id, dealer_id) {
     $.getJSON("/api/v1/moves/"+moveName, function (move) {
 
         var damageDone = 0;
+        var canMove = true;
+
+        // Paralysis check
+        if (gm_data["pokemon"][dealer_id]['afflictions'] != null &&
+            $.inArray("Paralysis", gm_data["pokemon"][dealer_id]['afflictions']) >= 0) {
+
+            // Save check roll
+            var check = roll(1, 20, 1);
+
+            if (check < 5) {
+                canMove = false;
+                doToast(gm_data["pokemon"][dealer_id]['name'] + " is paralyzed! They can't move!");
+            }
+        }
+
+        // Confusion check
+        if (canMove && "Confused" in battle[dealer_id]['afflictions'])
+            canMove = handleAffliction("Confused", dealer_id);
 
         // Check if Frozen (but don't Let It Go)
         if (gm_data["pokemon"][dealer_id]['afflictions'] != null &&
@@ -377,7 +396,7 @@ function performMove(moveName, target_id, dealer_id) {
         else if ("Fainted" in battle[dealer_id]['afflictions']) {
             doToast("Fainted Pokemon cannot use actions, abilities, or features")
         }
-        else {
+        else if (canMove) {
 
             var acRoll = roll(1, 20, 1) + battle[dealer_id]["stage_acc"];
             var crit = 20, evade = 0;
@@ -714,8 +733,11 @@ function addAffliction(affliction, monId, value) {
         gm_data['pokemon'][monId]['afflictions'] = [];
 
     // Persistent Afflictions
-    if (affliction == "Burned" || affliction == "Frozen" ||
-        affliction == "Paralysis" || affliction == "Poisoned") {
+    if ((affliction == "Burned" && $.inArray("Fire", gm_data['pokemon'][monId]['type'].split(" / ")) < 0) ||
+        (affliction == "Frozen" && $.inArray("Ice", gm_data['pokemon'][monId]['type'].split(" / ")) < 0) ||
+        (affliction == "Paralysis" && $.inArray("Electric", gm_data['pokemon'][monId]['type'].split(" / ")) < 0) ||
+        (affliction == "Poisoned"  && $.inArray("Poison", gm_data['pokemon'][monId]['type'].split(" / ")) < 0 &&
+        $.inArray("Steel", gm_data['pokemon'][monId]['type'].split(" / ")) < 0)) {
 
         // Create array if not found
         if (gm_data['pokemon'][monId]['afflictions'] == null)
@@ -743,6 +765,23 @@ function addAffliction(affliction, monId, value) {
         }
         else if (affliction == "Frozen") {
             doToast(gm_data["pokemon"][monId]['name'] + " is frozen solid!");
+        }
+        else if (affliction == "Paralysis") {
+            doToast(gm_data["pokemon"][monId]['name'] + " has been paralyzed!");
+        }
+        else if (affliction == "Poisoned") {
+            battle[monId]['stage_spdef'] = parseInt(battle[monId]['stage_spdef']) - 2;
+
+            if (battle[monId]['stage_spdef'] < -6)
+                battle[monId]['stage_spdef'] = -6;
+
+            sendMessage(battle[monId]['client_id'], JSON.stringify({
+                "type": "data_changed",
+                "field": "stage-spdef",
+                "value": battle[monId]['stage_spdef']
+            }));
+
+            doToast(gm_data["pokemon"][monId]['name'] + " has been poisoned!");
         }
     }
     // Other Afflictions
@@ -780,6 +819,9 @@ function addAffliction(affliction, monId, value) {
                 deleteAffliction("Suppressed", monId);
             if ("Temporary Hit Points" in battle[monId]["afflictions"])
                 deleteAffliction("Temporary Hit Points", monId);
+        }
+        else if (affliction == "Confused") {
+            doToast(gm_data["pokemon"][monId]['name'] + " is Confused!");
         }
     }
 
@@ -821,10 +863,30 @@ function deleteAffliction(affliction, monId) {
         else if (affliction == "Frozen") {
             doToast(gm_data["pokemon"][monId]['name'] + " was cured of Frozen");
         }
+        else if (affliction == "Paralysis") {
+            doToast(gm_data["pokemon"][monId]['name'] + " was cured of Paralysis");
+        }
+        else if (affliction == "Poisoned") {
+            battle[monId]['stage_spdef'] = parseInt(battle[monId]['stage_spdef']) + 2;
+
+            if (battle[monId]['stage_spdef'] > 6)
+                battle[monId]['stage_spdef'] = 6;
+
+            sendMessage(battle[monId]['client_id'], JSON.stringify({
+                "type": "data_changed",
+                "field": "stage-spdef",
+                "value": battle[monId]['stage_spdef']
+            }));
+
+            doToast(gm_data["pokemon"][monId]['name'] + " was cured of Poison");
+        }
     }
     else {
         // Remove from battle entry
         delete battle[monId]['afflictions'][affliction];
+
+        // Toast
+        doToast(gm_data["pokemon"][monId]['name'] + " was cured of " + affliction);
     }
 
     // Update Player client
@@ -841,15 +903,23 @@ function deleteAffliction(affliction, monId) {
  * Handle the effects of an affliction when triggered
  * @param affliction String affliction name
  * @param monId Id of the Pokemon
+ * @return boolean Returns true if allowed to perform an action
  */
 function handleAffliction(affliction, monId) {
     // Afflictions that take a Tick of Hit Points
-    if (affliction == "Burned") {
+    if (affliction == "Burned" || affliction == "Poisoned") {
 
         // Calculating max_hp
         var max_hp = gm_data["pokemon"][monId]['level'] + gm_data["pokemon"][monId]['hp'] * 3 + 10;
 
+        // Subtract health
         gm_data["pokemon"][monId]["health"] -= Math.floor(max_hp * 0.1);
+
+        // Show message
+        if (affliction == "Burned")
+            doToast(gm_data["pokemon"][monId]["name"] + " was damaged by their burn");
+        else if (affliction == "Poisoned")
+            doToast(gm_data["pokemon"][monId]["name"] + " was damaged from poison");
 
         // Check if fainted
         if (gm_data["pokemon"][monId]["health"] <= 0) {
@@ -861,8 +931,6 @@ function handleAffliction(affliction, monId) {
         var w = Math.floor((gm_data["pokemon"][monId]['health'] / max_hp) * 100);
 
         $("[data-name='"+monId+"']").find(".progress-bar").css("width", w + "%");
-
-        doToast(gm_data["pokemon"][monId]["name"] + " was damaged by their burn");
 
         // Update Player client
         sendMessage(battle[monId]["client_id"], JSON.stringify({
@@ -882,8 +950,29 @@ function handleAffliction(affliction, monId) {
             $.inArray("Fire", gm_data["pokemon"][monId]["type"].split(" / ")) >= 0))) {
 
             deleteAffliction("Frozen", monId);
+
+            return true;
         }
+
+        return false;
     }
+    // Confused save check
+    else if (affliction == "Confused") {
+        // Save check roll
+        var check_cf = roll(1, 20, 1);
+
+        // If rolled higher than 16, cure of Confusion
+        if (check_cf <= 8) {
+            doPhysicalStruggle(monId);
+            doToast(gm_data["pokemon"][monId]["name"] + " hurt itself in confusion!");
+
+            return false;
+        }
+        else if (check_cf >= 16)
+            deleteAffliction("Confused", monId);
+    }
+
+    return true;
 }
 
 /**
@@ -903,7 +992,7 @@ $(function () {
 function onAddmonDexChange() {
     if ($(this).val() != "") {
         $("#addmon-dex").parent().removeClass("has-error");
-        $.getJSON("api/v1/pokemon/" + $(this).val(), function (entry) {
+        $.getJSON("api/v1/"+pokedex+"/" + $(this).val(), function (entry) {
             // Fields to change
             var field_type1 = $("#addmon-type1");
             var field_type2 = $("#addmon-type2");
@@ -1009,7 +1098,7 @@ function updatePokemonEditor() {
     var dex = $("#addmon-dex").val();
 
     if (dex != "")
-        $.getJSON("api/v1/pokemon/" + dex, function (entry) {
+        $.getJSON("api/v1/"+pokedex+"/" + dex, function (entry) {
             // Fields to edit/view
             var field_level = $("#addmon-level");
             var field_health = $("#addmon-health");
