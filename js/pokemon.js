@@ -121,6 +121,58 @@ function displayInit() {
 
     //$("#dex-species").html('#' + pokemon_data["dex"] + ' - Species');
 
+    UpdatePokedexInfo();
+
+    //Speed Stat is set here
+    $("#speed").html(pokemon_data["speed"]);
+
+    $.each(moves_data, function (i, move) {
+
+        var movesEntry = display.find(".btn-move-" + (i + 1));
+
+        movesEntry.css("display", "block");
+
+        var title = move["Title"];
+        var freq = move["Freq"];
+        var type = move["Type"];
+        var desc = move["Effect"];
+        var dmgType = move["Class"];
+
+        // Get color for type
+        var color = typeColor(move["Type"]);
+
+        // Get icon for frequency
+
+        var frqIco;
+
+        if (freq === "EOT")
+            frqIco = '<i class="material-icons">autorenew</i> Every Other Turn';
+        else if (freq === "At-Will")
+            frqIco = '<i class="material-icons">grade</i> At Will';
+        else if (freq === "Static")
+            frqIco = '<i class="material-icons">remove</i> Static';
+        else if (freq.indexOf("Scene") !== -1 || freq.indexOf("Daily") !== -1)
+            frqIco = '<i class="material-icons">alarm</i> ' + freq;
+        else
+            frqIco = '<i class="material-icons">fiber_manual_record</i> ' + freq;
+
+        // Put data on card
+
+        movesEntry.find(".move-name").html(title).css("color", color);
+        movesEntry.find(".label-type").html(type).css("background-color", color);
+        movesEntry.find(".move-freq").html(frqIco);
+        movesEntry.find(".move-desc").attr("data-content", dmgType + " Move. " + desc);
+    });
+
+    $('[data-toggle="tooltip"]').tooltip();
+
+    display.find(".new-form").css("display", "none");
+    display.find(".pokemon-enemy").css("display", "block");
+
+    updateStatus();
+}
+
+function UpdatePokedexInfo() {
     //Pokedex Data is set here
     $.getJSON("api/v1/pokemon/" + pokemon_data['dex'], function (dex) {
 
@@ -299,54 +351,6 @@ function displayInit() {
             }
         }
     });
-
-    //Speed Stat is set here
-    $("#speed").html(pokemon_data["speed"]);
-
-    $.each(moves_data, function (i, move) {
-
-        var movesEntry = display.find(".btn-move-" + (i + 1));
-
-        movesEntry.css("display", "block");
-
-        var title = move["Title"];
-        var freq = move["Freq"];
-        var type = move["Type"];
-        var desc = move["Effect"];
-        var dmgType = move["Class"];
-
-        // Get color for type
-        var color = typeColor(move["Type"]);
-
-        // Get icon for frequency
-
-        var frqIco;
-
-        if (freq === "EOT")
-            frqIco = '<i class="material-icons">autorenew</i> Every Other Turn';
-        else if (freq === "At-Will")
-            frqIco = '<i class="material-icons">grade</i> At Will';
-        else if (freq === "Static")
-            frqIco = '<i class="material-icons">remove</i> Static';
-        else if (freq.indexOf("Scene") !== -1 || freq.indexOf("Daily") !== -1)
-            frqIco = '<i class="material-icons">alarm</i> ' + freq;
-        else
-            frqIco = '<i class="material-icons">fiber_manual_record</i> ' + freq;
-
-        // Put data on card
-
-        movesEntry.find(".move-name").html(title).css("color", color);
-        movesEntry.find(".label-type").html(type).css("background-color", color);
-        movesEntry.find(".move-freq").html(frqIco);
-        movesEntry.find(".move-desc").attr("data-content", dmgType + " Move. " + desc);
-    });
-
-    $('[data-toggle="tooltip"]').tooltip();
-
-    display.find(".new-form").css("display", "none");
-    display.find(".pokemon-enemy").css("display", "block");
-
-    updateStatus();
 }
 
 function updateInfoPage() {
